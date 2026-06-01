@@ -18,6 +18,7 @@ export default function App() {
   
   const aiRef = useRef<any>(null);
   const sessionRef = useRef<any>(null);
+  const brainScrollRef = useRef<HTMLDivElement>(null);
   
   const audioContextRef = useRef<AudioContext | null>(null);
   const scriptProcessorRef = useRef<ScriptProcessorNode | null>(null);
@@ -150,11 +151,19 @@ export default function App() {
   const [orbTheme, setOrbTheme] = useState<"cyan" | "white" | "red" | "amber">("cyan");
   const [apiProvider, setApiProvider] = useState<"google" | "openrouter">("google");
   const [customApiKey, setCustomApiKey] = useState<string>("");
+  const [obsidianTag, setObsidianTag] = useState<string>("");
+  const [obsidianFolder, setObsidianFolder] = useState<string>("");
 
   const [toasts, setToasts] = useState<{id: string, msg: string}[]>([]);
   
   const [brainAnalysisResult, setBrainAnalysisResult] = useState<{ query: string, result: string } | null>(null);
   const [brainIsAnalyzing, setBrainIsAnalyzing] = useState<boolean>(false);
+
+  useEffect(() => {
+     if (brainScrollRef.current) {
+         brainScrollRef.current.scrollTop = 0;
+     }
+  }, [brainAnalysisResult, brainIsAnalyzing]);
 
   const addToast = (msg: string) => {
     if (!showToasts) return;
@@ -185,6 +194,8 @@ export default function App() {
             if (data.orbTheme) setOrbTheme(data.orbTheme);
             if (data.apiProvider) setApiProvider(data.apiProvider);
             if (data.customApiKey !== undefined) setCustomApiKey(data.customApiKey);
+            if (data.obsidianTag !== undefined) setObsidianTag(data.obsidianTag);
+            if (data.obsidianFolder !== undefined) setObsidianFolder(data.obsidianFolder);
             addLog("System settings restored.");
         } catch(e) {
             console.error("Failed to load settings", e);
@@ -220,7 +231,9 @@ export default function App() {
           idleTimeout,
           orbTheme,
           apiProvider,
-          customApiKey
+          customApiKey,
+          obsidianTag,
+          obsidianFolder
       };
       localStorage.setItem('jarvis_settings', JSON.stringify(settings));
       addLog("External cache updated. Settings saved.");
@@ -789,21 +802,29 @@ export default function App() {
                     showHudIndicator('brightness', Number(args.level));
                 }
                 
+                // Augment brain_query args with global defaults if not provided by agent
+                let augmentedArgs = { ...args };
                 if (name === "brain_query") {
                     setBrainIsAnalyzing(true);
                     setBrainAnalysisResult(null); // Clear previous
+                    
+                    if (!augmentedArgs.tag && obsidianTag) augmentedArgs.tag = obsidianTag;
+                    if (!augmentedArgs.folder && obsidianFolder) augmentedArgs.folder = obsidianFolder;
+                    
                     const historyStr = localStorage.getItem('brain_query_history');
                     let history: any[] = [];
                     if (historyStr) {
                         try { history = JSON.parse(historyStr); } catch(e){}
                     }
                     // Only add if it's new or different from last to avoid duplicates
-                    if (history.length === 0 || JSON.stringify(history[history.length - 1]) !== JSON.stringify(args)) {
-                        history.push(args);
+                    if (history.length === 0 || JSON.stringify(history[history.length - 1]) !== JSON.stringify(augmentedArgs)) {
+                        history.push(augmentedArgs);
                         if (history.length > 10) history.shift();
                         localStorage.setItem('brain_query_history', JSON.stringify(history));
                     }
                 }
+
+                const payloadTarget = name === "brain_query" ? JSON.stringify(augmentedArgs) : (args.target || args.url || JSON.stringify(args)).toString();
 
                 const res = await fetch(`${localServerUrl}/execute`, {
                     method: "POST",
@@ -814,7 +835,7 @@ export default function App() {
                     },
                     body: JSON.stringify({
                         command_type: name, // you might map this: like "open" or "search"
-                        target: (args.target || args.url || JSON.stringify(args)).toString()
+                        target: payloadTarget
                     })
                 });
                 const data = await res.json();
@@ -1590,6 +1611,36 @@ export default function App() {
 
                    <div className="flex flex-col gap-2">
                        <div className="flex flex-col">
+                          <span className="text-zinc-200 font-mono text-sm">Obsidian Tag Filter</span>
+                          <span className="text-zinc-500 font-mono text-[10px]">Default tag for Brain Analysis (e.g., project)</span>
+                       </div>
+                       <input 
+                          type="text" 
+                          value={obsidianTag}
+                          onChange={(e) => setObsidianTag(e.target.value)}
+                          className="w-full bg-brand-bg/60 border border-brand-cyan/30 text-brand-cyan text-xs font-mono p-2 rounded outline-none focus:border-brand-cyan"
+                          placeholder="project"
+                       />
+                   </div>
+
+                   <div className="flex flex-col gap-2">
+                       <div className="flex flex-col">
+                          <span className="text-zinc-200 font-mono text-sm">Obsidian Folder Filter</span>
+                          <span className="text-zinc-500 font-mono text-[10px]">Default folder for Brain Analysis (e.g., Journal)</span>
+                       </div>
+                       <input 
+                          type="text" 
+                          value={obsidianFolder}
+                          onChange={(e) => setObsidianFolder(e.target.value)}
+                          className="w-full bg-brand-bg/60 border border-brand-cyan/30 text-brand-cyan text-xs font-mono p-2 rounded outline-none focus:border-brand-cyan"
+                          placeholder="Journal"
+                       />
+                   </div>
+
+                   <hr className="border-brand-cyan/20 my-2" />
+
+                   <div className="flex flex-col gap-2">
+                       <div className="flex flex-col">
                           <span className="text-zinc-200 font-mono text-sm">Your Name</span>
                           <span className="text-zinc-500 font-mono text-[10px]">What the AI should call you</span>
                        </div>
@@ -1747,10 +1798,10 @@ export default function App() {
         <AnimatePresence>
             {(brainAnalysisResult || brainIsAnalyzing) && (
                 <motion.div 
-                    initial={{ opacity: 0, y: 50, scale: 0.95 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    exit={{ opacity: 0, y: 30, scale: 0.95 }}
-                    transition={{ type: "spring", damping: 20, stiffness: 300 }}
+                    initial={{ opacity: 0, scale: 0.9, skewX: 10, filter: "hue-rotate(90deg) brightness(2)" }}
+                    animate={{ opacity: 1, scale: 1, skewX: 0, filter: "hue-rotate(0deg) brightness(1)" }}
+                    exit={{ opacity: 0, scale: 0.9, y: 30, filter: "blur(10px)" }}
+                    transition={{ duration: 0.3, type: "spring", damping: 15 }}
                     className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
                 >
                     <div className="w-full max-w-3xl aspect-[16/9] max-h-[80vh] flex flex-col bg-black/90 border border-brand-cyan/30 rounded-lg shadow-[0_0_30px_rgba(14,165,233,0.2)] overflow-hidden">
@@ -1766,7 +1817,7 @@ export default function App() {
                                 [CLOSE]
                             </button>
                         </div>
-                        <div className="flex-1 p-6 font-mono text-sm leading-relaxed overflow-y-auto" style={{ color: 'rgba(255,255,255,0.85)' }}>
+                        <div ref={brainScrollRef} className="flex-1 p-6 font-mono text-sm leading-relaxed overflow-y-auto" style={{ color: 'rgba(255,255,255,0.85)' }}>
                             {brainIsAnalyzing ? (
                                 <div className="flex items-center space-x-2 text-brand-cyan/80">
                                     <span className="animate-pulse">&gt;</span>
