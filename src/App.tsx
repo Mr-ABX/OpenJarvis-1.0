@@ -152,6 +152,9 @@ export default function App() {
   const [customApiKey, setCustomApiKey] = useState<string>("");
 
   const [toasts, setToasts] = useState<{id: string, msg: string}[]>([]);
+  
+  const [brainAnalysisResult, setBrainAnalysisResult] = useState<{ query: string, result: string } | null>(null);
+  const [brainIsAnalyzing, setBrainIsAnalyzing] = useState<boolean>(false);
 
   const addToast = (msg: string) => {
     if (!showToasts) return;
@@ -582,11 +585,13 @@ export default function App() {
                       },
                       {
                          name: "brain_query",
-                         description: "Use this tool to ask the user's secondary AI (The Brain/Gemini CLI) to search local files, read Obsidian notes, or perform complex local codebase analysis. Only use this when you need deep local context or file manipulation that you cannot do natively.",
+                         description: "Use this tool to ask the user's secondary AI (The Brain/Gemini CLI) to search local files, read Obsidian notes, or perform complex local codebase analysis. Only use this when you need deep local context or file manipulation that you cannot do natively. Supports filtering by tag or folder in Obsidian.",
                          parameters: {
                             type: Type.OBJECT,
                             properties: {
-                               target: { type: Type.STRING, description: "The specific query, command, or request to send to the Gemini CLI." }
+                               target: { type: Type.STRING, description: "The specific query, command, or request to send to the Gemini CLI." },
+                               tag: { type: Type.STRING, description: "Optional. Specific tag to filter Obsidian notes (e.g., 'project', 'urgent')." },
+                               folder: { type: Type.STRING, description: "Optional. Specific folder to filter Obsidian notes (e.g., 'Work', 'Journal')." }
                             },
                             required: ["target"]
                          }
@@ -784,6 +789,22 @@ export default function App() {
                     showHudIndicator('brightness', Number(args.level));
                 }
                 
+                if (name === "brain_query") {
+                    setBrainIsAnalyzing(true);
+                    setBrainAnalysisResult(null); // Clear previous
+                    const historyStr = localStorage.getItem('brain_query_history');
+                    let history: any[] = [];
+                    if (historyStr) {
+                        try { history = JSON.parse(historyStr); } catch(e){}
+                    }
+                    // Only add if it's new or different from last to avoid duplicates
+                    if (history.length === 0 || JSON.stringify(history[history.length - 1]) !== JSON.stringify(args)) {
+                        history.push(args);
+                        if (history.length > 10) history.shift();
+                        localStorage.setItem('brain_query_history', JSON.stringify(history));
+                    }
+                }
+
                 const res = await fetch(`${localServerUrl}/execute`, {
                     method: "POST",
                     headers: { 
@@ -803,6 +824,9 @@ export default function App() {
                     showHudIndicator('weather', data.message || "Failed to fetch weather.");
                 } else if (name === "get_news") {
                     showHudIndicator('news', data.message || "Failed to fetch news.");
+                } else if (name === "brain_query") {
+                    setBrainIsAnalyzing(false);
+                    setBrainAnalysisResult({ query: (args.target || JSON.stringify(args)).toString(), result: data.message || "No results." });
                 }
 
                 sessionRef.current.sendToolResponse({
@@ -854,6 +878,36 @@ export default function App() {
       updateStatus("SYSTEM OFFLINE");
       addLog("Disconnected.");
   };
+
+  useEffect(() => {
+      const handleKeyDown = (e: KeyboardEvent) => {
+          if (e.key === 'ArrowUp' && isConnectedRef.current) {
+              const historyStr = localStorage.getItem('brain_query_history');
+              if (historyStr) {
+                  try {
+                      const queries = JSON.parse(historyStr);
+                      if (queries && queries.length > 0) {
+                          const lastQuery = queries[queries.length - 1];
+                          addLog(`Re-running Brain Query...`);
+                          executeTool(
+                              Date.now().toString(),
+                              "brain_query",
+                              lastQuery,
+                              "approve"
+                          );
+                      } else {
+                          addToast("No Brain Query history found.");
+                      }
+                  } catch (e) { }
+              } else {
+                  addToast("No Brain Query history found.");
+              }
+          }
+      };
+      
+      window.addEventListener('keydown', handleKeyDown);
+      return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [localServerUrl, addLog, addToast]);
 
   useEffect(() => {
      const interval = setInterval(() => {
@@ -1688,6 +1742,55 @@ export default function App() {
                 ))}
             </AnimatePresence>
         </div>
+
+        {/* Brain Analysis Overlay */}
+        <AnimatePresence>
+            {(brainAnalysisResult || brainIsAnalyzing) && (
+                <motion.div 
+                    initial={{ opacity: 0, y: 50, scale: 0.95 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 30, scale: 0.95 }}
+                    transition={{ type: "spring", damping: 20, stiffness: 300 }}
+                    className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+                >
+                    <div className="w-full max-w-3xl aspect-[16/9] max-h-[80vh] flex flex-col bg-black/90 border border-brand-cyan/30 rounded-lg shadow-[0_0_30px_rgba(14,165,233,0.2)] overflow-hidden">
+                        <div className="flex items-center justify-between px-4 py-2 bg-brand-cyan/10 border-b border-brand-cyan/30">
+                            <div className="flex items-center gap-3">
+                                <div className="w-2 h-2 rounded-full bg-brand-cyan animate-pulse" />
+                                <span className="font-mono text-xs font-bold tracking-widest text-brand-cyan">GEMINI MAIN/BRAIN</span>
+                            </div>
+                            <button 
+                                onClick={() => { setBrainAnalysisResult(null); setBrainIsAnalyzing(false); }}
+                                className="text-brand-cyan/60 hover:text-brand-cyan font-mono text-xs transition-colors"
+                            >
+                                [CLOSE]
+                            </button>
+                        </div>
+                        <div className="flex-1 p-6 font-mono text-sm leading-relaxed overflow-y-auto" style={{ color: 'rgba(255,255,255,0.85)' }}>
+                            {brainIsAnalyzing ? (
+                                <div className="flex items-center space-x-2 text-brand-cyan/80">
+                                    <span className="animate-pulse">&gt;</span>
+                                    <span>ANALYZING VAULT...</span>
+                                </div>
+                            ) : brainAnalysisResult ? (
+                                <div className="space-y-4">
+                                    <div className="text-brand-cyan/60 shrink-0 border-b border-brand-cyan/20 pb-2">
+                                        &gt; {brainAnalysisResult.query}
+                                    </div>
+                                    <pre className="whitespace-pre-wrap font-mono text-[13px] text-emerald-400">
+                                        {brainAnalysisResult.result}
+                                    </pre>
+                                </div>
+                            ) : null}
+                        </div>
+                        <div className="px-4 py-2 border-t border-brand-cyan/20 bg-black/50 text-[10px] text-brand-cyan/40 font-mono tracking-widest flex justify-between">
+                            <span>STATUS: {brainIsAnalyzing ? 'WORKING' : 'COMPLETE'}</span>
+                            <span>{new Date().toLocaleTimeString()}</span>
+                        </div>
+                    </div>
+                </motion.div>
+            )}
+        </AnimatePresence>
 
       </div>
     </div>

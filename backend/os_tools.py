@@ -128,8 +128,28 @@ def execute_os_command(command_type: str, target: str):
             return "Display move not natively supported easily on this OS without extra tools like Yabai or specific Windows commands."
         elif command_type == "brain_query":
             try:
+                # Target could be a JSON string with tag/folder from frontend
+                tag = None
+                folder = None
+                query = target
+                
+                try:
+                    import json
+                    args = json.loads(target)
+                    query = args.get("target", target)
+                    tag = args.get("tag")
+                    folder = args.get("folder")
+                except:
+                    pass
+
+                gemini_args = ["gemini", "Inquiry: " + query]
+                if tag:
+                    gemini_args.append(f"--tag={tag}")
+                if folder:
+                    gemini_args.append(f"--folder={folder}")
+
                 process = subprocess.Popen(
-                    ["gemini", "Inquiry: " + target],
+                    gemini_args,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     text=True
