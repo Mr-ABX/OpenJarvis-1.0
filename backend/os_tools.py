@@ -126,6 +126,22 @@ def execute_os_command(command_type: str, target: str):
                 subprocess.Popen(["osascript", "-e", script])
                 return f"Attempted to move {app_name} to second display (Requires Accessibility Permissions and fixed coordinates)."
             return "Display move not natively supported easily on this OS without extra tools like Yabai or specific Windows commands."
+        elif command_type == "brain_query":
+            try:
+                process = subprocess.Popen(
+                    ["gemini", "Inquiry: " + target],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True
+                )
+                stdout, stderr = process.communicate()
+
+                if process.returncode == 0:
+                    return f"Brain Analysis Complete:\n{stdout}"
+                else:
+                    return f"Brain Link Error: {stderr}"
+            except Exception as e:
+                return f"Brain Link Exception: {str(e)}"
 
     except Exception as e:
         return f"Failed to execute command: {str(e)}"

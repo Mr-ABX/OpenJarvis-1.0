@@ -581,6 +581,17 @@ export default function App() {
                          description: "Puts you into sleep/offline/idle mode, shutting down your systems.",
                       },
                       {
+                         name: "brain_query",
+                         description: "Use this tool to ask the user's secondary AI (The Brain/Gemini CLI) to search local files, read Obsidian notes, or perform complex local codebase analysis. Only use this when you need deep local context or file manipulation that you cannot do natively.",
+                         parameters: {
+                            type: Type.OBJECT,
+                            properties: {
+                               target: { type: Type.STRING, description: "The specific query, command, or request to send to the Gemini CLI." }
+                            },
+                            required: ["target"]
+                         }
+                      },
+                      {
                          name: "toggle_vision_mode",
                          description: "Enables or disables your camera vision mode sight.",
                          parameters: {
